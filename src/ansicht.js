@@ -25,7 +25,8 @@ export async function monatsDaten(db, jahr, monat) {
   const start = (await db.einstellungen.get('turnusStart'))?.value;
 
   return tage.map((datum) => {
-    const eintrag = byDatum.get(datum) ?? null;
+    const roh = byDatum.get(datum) ?? null;
+    const eintrag = roh?.ruhe ? null : roh; // Ruhe sieht aus wie ein freier Tag
     const vortag = byDatum.get(addTage(datum, -1));
     const fortsetzung = vortag?.endeFolgetag ? { code: vortag.code, ende: vortag.ende } : null;
     const ds = tageNr(datum) * 1440;
