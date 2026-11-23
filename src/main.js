@@ -3,6 +3,7 @@ import { turnusImportieren, planErzeugen, eintragSetzen, eintragLoeschen, histor
 import { monatsDaten } from './ansicht.js';
 import { sicherungErstellen, sicherungEinspielen } from './sicherung.js';
 import { TAGE, addTage, wochentag, hhmm, minuten } from './zeit.js';
+import { auswertung, zeitraumFuer, hhmmMitZeichen } from './auswertung.js';
 
 const db = createDb('dienstplan');
 const app = document.getElementById('app');
@@ -11,7 +12,7 @@ const MONATE = ['Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', '
 const heuteStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const zweiStellig = (n) => String(n).padStart(2, '0');
 
-const state = { seite: 'kalender', ansicht: window.innerWidth > 720 ? 'raster' : 'liste', jahr: null, monat: null };
+const state = { zeitraum: null, seite: 'kalender', ansicht: window.innerWidth > 720 ? 'raster' : 'liste', jahr: null, monat: null };
 
 // ---------------------------------------------------------------- Start
 async function start() {
@@ -28,7 +29,7 @@ async function start() {
 }
 
 function zeichneNav() {
-  const punkte = [['kalender', 'Kalender'], ['typen', 'Schichttypen'], ['historie', 'Historie'], ['sicherung', 'Sicherung']];
+  const punkte = [['kalender', 'Kalender'], ['auswertung', 'Auswertung'], ['typen', 'Schichttypen'], ['historie', 'Historie'], ['sicherung', 'Sicherung']];
   nav.innerHTML = punkte.map(([id, text]) => `<button data-seite="${id}" aria-current="${state.seite === id}">${text}</button>`).join('');
 }
 
@@ -36,6 +37,7 @@ async function zeichne() {
   zeichneNav();
   if ((await db.eintraege.count()) === 0 && state.seite !== 'sicherung') return zeichneEinrichtung();
   if (state.seite === 'kalender') return zeichneKalender();
+  if (state.seite === 'auswertung') return zeichneAuswertung();
   if (state.seite === 'typen') return zeichneTypen();
   if (state.seite === 'historie') return zeichneHistorie();
   if (state.seite === 'sicherung') return zeichneSicherung();
@@ -144,6 +146,34 @@ async function zeichneTypen() {
     <div style="overflow-x:auto"><table><thead><tr><th>Code</th><th>Gültig</th>${TAGE.map((t) => `<th>${t}</th>`).join('')}</tr></thead><tbody>${zeilen}</tbody></table></div>`;
 }
 
+
+
+// ---------------------------------------------------------------- Auswertung
+const kurz = (d) => `${d.slice(8)}.${d.slice(5, 7)}.`;
+async function zeichneAuswertung() {
+  const heute = heuteStr();
+  if (!state.zeitraum) {
+    const erster = (await db.eintraege.orderBy('datum').first()).datum;
+    const letzter = (await db.eintraege.orderBy('datum').last()).datum;
+    state.zeitraum = zeitraumFuer(heute < erster || heute > letzter ? erster : heute);
+  }
+  const a = await auswertung(db, state.zeitraum.von, state.zeitraum.bis, heute);
+  const zeile = (name, z) => z ? `<tr><td>${name}</td><td class="zahl">${hhmm(Math.round(z.ist))}</td><td class="zahl">${hhmm(Math.round(z.soll))}</td><td class="zahl"><b>${hhmmMitZeichen(Math.round(z.saldo))}</b></td></tr>` : '';
+  app.innerHTML = `
+    <h1>Auswertung</h1>
+    <div class="leiste">
+      <button class="knopf" data-zeitraum="-1" aria-label="Voriger Zeitraum">&lsaquo;</button>
+      <b>${kurz(a.von)}${a.von.slice(0, 4)} bis ${kurz(a.bis)}${a.bis.slice(0, 4)}</b>
+      <button class="knopf" data-zeitraum="1" aria-label="Nächster Zeitraum">&rsaquo;</button>
+    </div>
+    ${a.teilweise ? '<p class="hinweis">Dieser Zeitraum liegt nur teilweise im Plan. Das Soll wird nur für Tage im Plan gerechnet.</p>' : ''}
+    <table><thead><tr><th></th><th class="zahl">Ist (bAZ)</th><th class="zahl">Soll</th><th class="zahl">Saldo</th></tr></thead><tbody>
+      ${zeile('Bis gestern', a.bisHeute)}${zeile('Ganzer Zeitraum (laut Plan)', a.gesamt)}</tbody></table>
+    <h2>Pro Woche</h2>
+    <table><thead><tr><th>Woche</th><th class="zahl">Ist</th><th class="zahl">Soll</th><th class="zahl">Differenz</th><th class="zahl">Saldo gesamt</th></tr></thead><tbody>
+      ${a.wochen.filter((w) => w.tage > 0).map((w) => `<tr><td class="kein-umbruch">${kurz(w.von)}–${kurz(w.bis)}</td><td class="zahl">${hhmm(Math.round(w.ist))}</td><td class="zahl">${hhmm(Math.round(w.soll))}</td><td class="zahl">${hhmmMitZeichen(Math.round(w.saldo))}</td><td class="zahl">${hhmmMitZeichen(Math.round(w.kumuliert))}</td></tr>`).join('')}</tbody></table>
+    <p class="hinweis">Alle Werte in Stunden:Minuten (324:30 = 324 Stunden 30 Minuten). Soll: 38,5 Stunden pro Woche, das sind 38 Stunden 30 Minuten oder 5 Stunden 30 Minuten pro Tag. Ist: nur die bAZ aus dem Plan, ohne Fahrzeit (FZ) und Nachtfaktor (NF). Urlaub, Krankenstand, Feiertage und Zulagen sind noch nicht berücksichtigt.</p>`;
+}
 
 // ---------------------------------------------------------------- Tag bearbeiten
 const KATEGORIEN = [['geplant', 'Geplant'], ['aenderung', 'Änderung'], ['zusatzschicht', 'Zusatzschicht']];
@@ -274,6 +304,7 @@ document.addEventListener('click', (ev) => {
   const b = ev.target.closest('button');
   if (!b) { const z = ev.target.closest('[data-datum]'); if (z && state.seite === 'kalender') oeffneTag(z.dataset.datum); return; }
   if (b.dataset.seite) { state.seite = b.dataset.seite; zeichne(); }
+  else if (b.dataset.zeitraum) { const z = state.zeitraum; const n = +b.dataset.zeitraum; const t = n > 0 ? addTage(z.bis, 1) : addTage(z.von, -1); state.zeitraum = zeitraumFuer(t); zeichne(); }
   else if (b.dataset.ansicht) { state.ansicht = b.dataset.ansicht; zeichne(); }
   else if (b.dataset.aktion === 'vor') { [state.jahr, state.monat] = monatWeiter(1); zeichne(); }
   else if (b.dataset.aktion === 'zurueck') { [state.jahr, state.monat] = monatWeiter(-1); zeichne(); }

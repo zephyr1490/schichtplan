@@ -2,7 +2,8 @@ import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { createDb } from './src/db.js';
 import { turnusImportieren, planErzeugen, eintragSetzen, eintragLoeschen, historie, nrvSetzen, wrAnteil, bazSumme, zeitenVorschlag } from './src/dienstplan.js';
-import { hhmm, TAGE, wochentag } from './src/zeit.js';
+import { hhmm, TAGE, wochentag, addTage, minuten } from './src/zeit.js';
+import { auswertung, zeitraumFuer, bazMinuten } from './src/auswertung.js';
 
 const db = createDb('test');
 const ok = (bed, text) => { console.log(`${bed ? 'OK    ' : 'FEHLER'} ${text}`); if (!bed) process.exitCode = 1; };
@@ -61,3 +62,17 @@ ok(letzter <= '2027-12-12', 'Plan endet spätestens am 12.12.2027');
 await eintragLoeschen(db, '2026-12-20');
 const hh = await historie(db, '2026-12-20');
 ok(!(await db.eintraege.get('2026-12-20')) && hh.length === 2 && hh[1].neu === null && hh[1].alt.code === '10004', 'Entfernen: Tag frei, Historie vollständig (anlegen, entfernen)');
+
+// 10) Auswertung: frische Datenbank, 31 Turnus-Wochen müssen genau die gedruckten Wochensummen ergeben
+const db2 = createDb('test2');
+await turnusImportieren(db2, fs.readFileSync('daten/turnus_schichten.csv', 'utf8'), fs.readFileSync('daten/turnus_wochenruhe.csv', 'utf8'), '2026-12-13');
+await planErzeugen(db2, '2026-12-14', 27);
+const gedruckt = '40:06 36:49 33:13 37:57 38:11 39:05 34:38 35:30 36:13 35:13 29:27 33:13 40:29 33:03 34:58 32:33 36:30 34:12 34:37 39:29 36:08 40:23 41:52 35:30 34:19 39:28 38:26 41:58 40:26 35:13 34:15'.split(' ').reduce((s2, x) => s2 + minuten(x), 0);
+const a31 = await auswertung(db2, '2026-12-14', addTage('2026-12-14', 31 * 7 - 1), '2026-12-14');
+ok(a31.gesamt.ist === gedruckt, `31 Wochen Ist = ${hhmm(a31.gesamt.ist)} (Summe der gedruckten Wochen: ${hhmm(gedruckt)})`);
+ok(a31.gesamt.soll === 31 * 38.5 * 60, `Soll 31 Wochen = ${hhmm(a31.gesamt.soll)} (31 x 38:30)`);
+const jf = zeitraumFuer('2027-02-10'); ok(jf.von === '2027-01-01' && jf.bis === '2027-02-28', `Zeitraum zu 10.02.2027: ${jf.von} bis ${jf.bis}`);
+const a1 = await auswertung(db2, jf.von, jf.bis, '2027-02-01');
+console.log(`Jänner/Februar 2027: Ist ${hhmm(a1.gesamt.ist)}, Soll ${hhmm(a1.gesamt.soll)}, Saldo ${a1.gesamt.saldo / 60}h, bis gestern Saldo ${a1.bisHeute.saldo / 60}h`);
+const nd = zeitraumFuer('2026-12-20'); const and = await auswertung(db2, nd.von, nd.bis, '2026-12-20');
+ok(and.teilweise && and.gesamt.tage === 18, `Nov/Dez 2026: nur ${and.gesamt.tage} von ${and.tageImZeitraum} Tagen im Plan`);
