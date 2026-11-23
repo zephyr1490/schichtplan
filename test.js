@@ -132,3 +132,19 @@ ok(fehler?.includes('nach dem Start'), 'Ende vor Start wird abgelehnt');
 const vorLoesch = (await historie(db2)).length;
 await historieEintragLoeschen(db2, hw[0].id);
 ok((await historie(db2)).length === vorLoesch - 1 && (await wochenruhenFuerTag(db2, '2026-12-20'))[0].start === '2026-12-19 15:29', 'Einzelner Historieneintrag gelöscht, die WR-Änderung selbst bleibt');
+
+// ---- verschlüsselte Turnus-Datei
+{
+  const { turnusDateiOeffnen } = await import('./src/krypto.js');
+  const { readFileSync } = await import('node:fs');
+  const datei = JSON.parse(readFileSync('./public/turnus.enc.json', 'utf8'));
+  const ma = readFileSync('./daten/mitarbeiter.csv', 'utf8').trim().split('\n').map((z) => z.split(';'));
+  let alleOk = true;
+  for (const [n, d] of ma) { const t = await turnusDateiOeffnen(datei, d); if (!t || t.woche !== +n) alleOk = false; }
+  console.log(alleOk ? 'OK    ' : 'FEHLER', 'alle 31 Dienstnummern öffnen die richtige Turnus-Woche');
+  const t27 = await turnusDateiOeffnen(datei, ma.find((m) => m[0] === '27')[1]);
+  console.log(t27.schichtenCsv === readFileSync('./daten/turnus_schichten.csv', 'utf8') && t27.planStart === '2026-12-14' ? 'OK    ' : 'FEHLER', 'Inhalt unverändert, Planstart 14.12.2026');
+  console.log((await turnusDateiOeffnen(datei, '000000')) === null ? 'OK    ' : 'FEHLER', 'unbekannte Nummer wird abgelehnt');
+  const roh = readFileSync('./public/turnus.enc.json', 'utf8');
+  console.log(!ma.some((m) => roh.includes(m[1])) && !roh.includes('10011') ? 'OK    ' : 'FEHLER', 'weder Nummern noch Schichtcodes im Klartext');
+}

@@ -1,3 +1,4 @@
+import { turnusDateiOeffnen } from './krypto.js';
 import { createDb } from './db.js';
 import { turnusImportieren, planErzeugen, eintragSetzen, eintragLoeschen, historie, wrAnteilBerechnen, zeitenVorschlag, folgetagKonflikt, planZuruecksetzen, allesLoeschen, wochenruhenFuerTag, wrVersetzen, historieEintragLoeschen } from './dienstplan.js';
 import { monatsDaten } from './ansicht.js';
@@ -47,28 +48,49 @@ async function zeichne() {
 function zeichneEinrichtung() {
   app.innerHTML = `
     <h1>Einrichtung</h1>
-    <p class="hinweis">Es ist noch kein Plan vorhanden. Wähle die beiden Turnus-Dateien von deinem Gerät aus. Sie werden nur in diesem Browser gespeichert.</p>
+    <p class="hinweis">Es ist noch kein Plan vorhanden. Gib deine Dienstnummer ein, dann wird dein Plan eingerichtet. Die Nummer wird nicht gespeichert, der Plan nur in diesem Browser.</p>
     <div class="box">
+      <label for="dnr">Dienstnummer (6 Ziffern)</label>
+      <input id="dnr" type="text" inputmode="numeric" autocomplete="off" maxlength="6">
+      <p><button class="knopf" id="plan-los">Plan erzeugen</button></p>
+      <p class="hinweis" id="fehler"></p>
+    </div>
+    <details class="box">
+      <summary>Stattdessen eigene Dateien verwenden</summary>
       <label for="f-schichten">Datei turnus_schichten.csv</label>
       <input id="f-schichten" type="file" accept=".csv,text/csv">
       <label for="f-wr">Datei turnus_wochenruhe.csv</label>
       <input id="f-wr" type="file" accept=".csv,text/csv">
       <label for="startdatum">Erster Tag (ein Montag)</label>
       <input id="startdatum" type="date" value="2026-12-14">
-      <label for="startwoche">Mitarbeiternummer (= Turnus-Woche am 14.12.)</label>
+      <label for="startwoche">Turnus-Woche an diesem Tag</label>
       <input id="startwoche" type="number" min="1" max="31" value="27">
-      <p class="hinweis">Der Plan umfasst 52 Wochen, der Turnus (31 Wochen) beginnt danach wieder von vorn.</p>
-      <p><button class="knopf" id="plan-los">Plan erzeugen</button></p>
-      <p class="hinweis" id="fehler"></p>
-    </div>`;
+      <p><button class="knopf" id="plan-datei">Plan aus Dateien erzeugen</button></p>
+    </details>`;
+  const fehler = (t) => { document.getElementById('fehler').textContent = t; };
   document.getElementById('plan-los').onclick = async () => {
+    try {
+      fehler('');
+      const nr = document.getElementById('dnr').value.trim();
+      if (!/^\d{6}$/.test(nr)) throw new Error('Bitte die 6-stellige Dienstnummer eingeben.');
+      fehler('Einen Moment bitte …');
+      const antwort = await fetch('turnus.enc.json', { cache: 'no-cache' });
+      if (!antwort.ok) throw new Error('Die Turnus-Datei konnte nicht geladen werden (Internet nötig).');
+      const t = await turnusDateiOeffnen(await antwort.json(), nr);
+      if (!t) throw new Error('Diese Dienstnummer ist nicht bekannt.');
+      await turnusImportieren(db, t.schichtenCsv, t.wrCsv, t.gueltigAb);
+      await planErzeugen(db, t.planStart, t.woche, 52);
+      await start();
+    } catch (e) { fehler(e.message); }
+  };
+  document.getElementById('plan-datei').onclick = async () => {
     try {
       const fs = document.getElementById('f-schichten').files[0], fw = document.getElementById('f-wr').files[0];
       if (!fs || !fw) throw new Error('Bitte beide Dateien auswählen.');
       await turnusImportieren(db, await fs.text(), await fw.text(), '2026-12-13');
       await planErzeugen(db, document.getElementById('startdatum').value, +document.getElementById('startwoche').value, 52);
       await start();
-    } catch (e) { document.getElementById('fehler').textContent = e.message; }
+    } catch (e) { fehler(e.message); }
   };
 }
 
