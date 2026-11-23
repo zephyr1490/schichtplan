@@ -1,8 +1,8 @@
 import { createDb } from './db.js';
-import { turnusImportieren, planErzeugen } from './dienstplan.js';
+import { turnusImportieren, planErzeugen, eintragSetzen, eintragLoeschen, historie, wrAnteilBerechnen, zeitenVorschlag } from './dienstplan.js';
 import { monatsDaten } from './ansicht.js';
 import { sicherungErstellen, sicherungEinspielen } from './sicherung.js';
-import { TAGE, addTage, wochentag } from './zeit.js';
+import { TAGE, addTage, wochentag, hhmm, minuten } from './zeit.js';
 
 const db = createDb('dienstplan');
 const app = document.getElementById('app');
@@ -28,7 +28,7 @@ async function start() {
 }
 
 function zeichneNav() {
-  const punkte = [['kalender', 'Kalender'], ['typen', 'Schichttypen'], ['sicherung', 'Sicherung']];
+  const punkte = [['kalender', 'Kalender'], ['typen', 'Schichttypen'], ['historie', 'Historie'], ['sicherung', 'Sicherung']];
   nav.innerHTML = punkte.map(([id, text]) => `<button data-seite="${id}" aria-current="${state.seite === id}">${text}</button>`).join('');
 }
 
@@ -37,6 +37,7 @@ async function zeichne() {
   if ((await db.eintraege.count()) === 0 && state.seite !== 'sicherung') return zeichneEinrichtung();
   if (state.seite === 'kalender') return zeichneKalender();
   if (state.seite === 'typen') return zeichneTypen();
+  if (state.seite === 'historie') return zeichneHistorie();
   if (state.seite === 'sicherung') return zeichneSicherung();
 }
 
@@ -104,7 +105,7 @@ function listeHtml(tage) {
     const klassen = [e || !t.imPlan ? '' : 'frei', !t.imPlan ? 'frei' : '', t.wr.length ? 'wr' : '', t.reserve ? 'reserve' : '', t.wt === 0 ? 'woche' : '', t.datum === heute ? 'heute' : ''].join(' ');
     const hinweise = [t.reserve ? 'Reserve' : '', ...t.wr, t.fortsetzung ? `${t.fortsetzung.code} bis ${t.fortsetzung.ende}` : '', e && e.nrv ? 'NRV' : '', e && e.kategorie && e.kategorie !== 'geplant' ? e.kategorie : '']
       .filter(Boolean).join(' · ');
-    return `<tr class="${klassen}">
+    return `<tr class="${klassen}"${t.imPlan ? ` data-datum="${t.datum}"` : ''}>
       <td class="kein-umbruch">${t.wtName} ${zweiStellig(t.tag)}.${zweiStellig(+t.datum.slice(5, 7))}.${t.wt === 0 && t.turnusWoche ? `<div class="klein">Wo ${t.turnusWoche}</div>` : ''}</td>
       <td class="kein-umbruch">${e ? `<span class="code">${e.code}</span>` : (t.imPlan ? 'frei' : 'kein Plan')}</td>
       <td class="kein-umbruch">${e ? zeiten(e) : ''}</td>
@@ -121,7 +122,7 @@ function rasterHtml(tage) {
   const zellen = tage.map((t) => {
     const e = t.eintrag;
     const klassen = ['tag', t.wr.length ? 'wr' : '', t.reserve ? 'reserve' : '', t.datum === heute ? 'heute' : ''].join(' ');
-    return `<div class="${klassen}"><span class="nr">${t.tag}</span>
+    return `<div class="${klassen}"${t.imPlan ? ` data-datum="${t.datum}"` : ''}><span class="nr">${t.tag}</span>
       ${t.fortsetzung ? `<div class="klein">${t.fortsetzung.code} bis ${t.fortsetzung.ende}</div>` : ''}
       ${e ? `<div class="code">${e.code}</div><div class="zeit">${e.beginn}–${e.ende}${e.endeFolgetag ? ' +1' : ''}</div>${e.nrv ? '<div class="klein">NRV</div>' : ''}` : ''}
       ${t.wr.map((w) => `<div class="klein">${w}</div>`).join('')}</div>`;
@@ -141,6 +142,105 @@ async function zeichneTypen() {
     <h1>Schichttypen</h1>
     <p class="hinweis">Zeiten je Wochentag, wie sie im Turnus vorkommen. Ein Strich heißt: im Turnus nicht vorhanden. Bearbeiten kommt im nächsten Schritt.</p>
     <div style="overflow-x:auto"><table><thead><tr><th>Code</th><th>Gültig</th>${TAGE.map((t) => `<th>${t}</th>`).join('')}</tr></thead><tbody>${zeilen}</tbody></table></div>`;
+}
+
+
+// ---------------------------------------------------------------- Tag bearbeiten
+const KATEGORIEN = [['geplant', 'Geplant'], ['aenderung', 'Änderung'], ['zusatzschicht', 'Zusatzschicht']];
+const fmtZeitpunkt = (iso) => { const d = new Date(iso); return `${zweiStellig(d.getDate())}.${zweiStellig(d.getMonth() + 1)}.${d.getFullYear()} ${zweiStellig(d.getHours())}:${zweiStellig(d.getMinutes())}`; };
+const beschr = (x) => (x ? `${x.code} ${x.beginn}–${x.ende}${x.nrv ? ' NRV' : ''}` : 'frei');
+const datumKurz = (d) => `${TAGE[wochentag(d)]} ${d.slice(8)}.${d.slice(5, 7)}.${d.slice(0, 4)}`;
+
+async function oeffneTag(datum) {
+  const dlg = document.getElementById('dlg');
+  const e = await db.eintraege.get(datum);
+  const wrs = await db.wochenruhen.toArray();
+  const codes = (await db.schichtTypen.toArray()).map((t) => t.code).sort((a, b) => a.localeCompare(b, 'de', { numeric: true }));
+  const hist = await historie(db, datum);
+  dlg.innerHTML = `
+    <form method="dialog" id="tagform">
+      <h2 style="margin-top:0">${datumKurz(datum)}</h2>
+      <p class="hinweis">Jetzt: ${e ? beschr(e) : 'frei'}</p>
+      <label for="f-code">Schicht</label>
+      <input id="f-code" list="codes" value="${e ? e.code : ''}" autocomplete="off">
+      <datalist id="codes">${codes.map((c) => `<option value="${c}">`).join('')}</datalist>
+      <div class="zeile">
+        <div><label for="f-beginn">Beginn</label><input id="f-beginn" type="time" value="${e ? e.beginn : ''}"></div>
+        <div><label for="f-ende">Ende</label><input id="f-ende" type="time" value="${e ? e.ende : ''}"></div>
+        <div><label for="f-baz">bAZ (h:mm)</label><input id="f-baz" type="text" inputmode="numeric" placeholder="z.B. 11:13" value="${e && e.baz ? e.baz : ''}" size="6"></div>
+      </div>
+      <p class="klein" id="f-info"></p>
+      <label for="f-kat">Art</label>
+      <select id="f-kat">${KATEGORIEN.map(([k, t]) => `<option value="${k}"${(e ? e.kategorie : 'zusatzschicht') === k ? ' selected' : ''}>${t}</option>`).join('')}</select>
+      <label class="check"><input id="f-nrv" type="checkbox"${e && e.nrv ? ' checked' : ''}> NRV (nicht rechtzeitig verständigt)</label>
+      <p id="f-wr" class="wrhinweis"></p>
+      <p id="f-fehler" class="klein"></p>
+      <div class="leiste">
+        <button class="knopf" id="f-speichern" type="button">Speichern</button>
+        <button class="knopf" id="f-abbrechen" type="button">Abbrechen</button>
+        <span class="raum"></span>
+        ${e ? '<button class="knopf" id="f-loeschen" type="button">Dienst entfernen</button>' : ''}
+      </div>
+    </form>
+    <h2>Änderungen an diesem Tag</h2>
+    ${hist.length ? `<table><tbody>${hist.map((h) => `<tr><td class="kein-umbruch klein">${fmtZeitpunkt(h.zeitstempel)}</td><td>${beschr(h.alt)} &rarr; ${beschr(h.neu)}</td></tr>`).join('')}</tbody></table>` : '<p class="klein">Noch keine.</p>'}`;
+
+  const el = (id) => document.getElementById(id);
+  const orig = e ? { code: e.code, beginn: e.beginn, ende: e.ende, baz: e.baz ?? '' } : null;
+  let zeitenAngefasst = false;
+
+  const wrHinweis = () => {
+    const b = el('f-beginn').value, en = el('f-ende').value;
+    if (!b || !en) { el('f-wr').textContent = ''; el('f-info').textContent = ''; return; }
+    const r = wrAnteilBerechnen(wrs, datum, b, en);
+    el('f-info').textContent = minuten(en) < minuten(b) ? 'Endet am Folgetag.' : '';
+    el('f-wr').textContent = r.inWr ? `${hhmm(r.inWr)}h in der WR (${hhmm(r.ausserhalb)}h außerhalb)` : '';
+  };
+  const artAnpassen = () => {
+    if (!orig || el('f-kat').value !== 'geplant') return;
+    if (el('f-code').value !== orig.code || el('f-beginn').value !== orig.beginn || el('f-ende').value !== orig.ende) el('f-kat').value = 'aenderung';
+  };
+  el('f-code').addEventListener('change', async () => {
+    const code = el('f-code').value.trim();
+    if (!zeitenAngefasst && code) {
+      const v = await zeitenVorschlag(db, code, datum);
+      if (v) { el('f-beginn').value = v.beginn; el('f-ende').value = v.ende; el('f-baz').value = v.baz ?? ''; el('f-fehler').textContent = 'Zeiten aus dem Schichttyp übernommen.'; }
+      else el('f-fehler').textContent = 'Für diese Schicht an diesem Wochentag sind keine Zeiten bekannt. Bitte selbst eintragen.';
+    }
+    artAnpassen(); wrHinweis();
+  });
+  for (const id of ['f-beginn', 'f-ende', 'f-baz']) el(id).addEventListener('input', () => { zeitenAngefasst = true; artAnpassen(); wrHinweis(); });
+  wrHinweis();
+
+  el('f-abbrechen').onclick = () => dlg.close();
+  el('f-speichern').onclick = async () => {
+    const code = el('f-code').value.trim(), beginn = el('f-beginn').value, ende = el('f-ende').value;
+    if (!code || !beginn || !ende) { el('f-fehler').textContent = 'Schicht, Beginn und Ende werden benötigt.'; return; }
+    const baz = el('f-baz').value.trim();
+    if (baz && !/^\d{1,2}:[0-5]\d$/.test(baz)) { el('f-fehler').textContent = 'bAZ bitte als h:mm eintragen, z.B. 11:13.'; return; }
+    const nrv = el('f-nrv').checked, kategorie = el('f-kat').value;
+    if (e && e.code === code && e.beginn === beginn && e.ende === ende && (e.baz ?? '') === baz && e.kategorie === kategorie && !!e.nrv === nrv) { dlg.close(); return; }
+    await eintragSetzen(db, datum, { code, beginn, ende, baz: baz || null, kategorie, nrv });
+    dlg.close(); zeichne();
+  };
+  if (e) {
+    let sicher = false;
+    el('f-loeschen').onclick = async () => {
+      if (!sicher) { sicher = true; el('f-loeschen').textContent = 'Wirklich entfernen?'; return; }
+      await eintragLoeschen(db, datum); dlg.close(); zeichne();
+    };
+  }
+  dlg.showModal();
+}
+
+// ---------------------------------------------------------------- Historie
+async function zeichneHistorie() {
+  const alle = (await historie(db)).reverse();
+  app.innerHTML = `
+    <h1>Historie</h1>
+    <p class="hinweis">Jede Änderung wird hier festgehalten und nie überschrieben. Neueste zuerst.</p>
+    ${alle.length ? `<table><thead><tr><th>Zeitpunkt</th><th>Tag</th><th>Vorher</th><th>Nachher</th></tr></thead><tbody>
+      ${alle.map((h) => `<tr><td class="kein-umbruch klein">${fmtZeitpunkt(h.zeitstempel)}</td><td class="kein-umbruch">${datumKurz(h.datum)}</td><td>${beschr(h.alt)}</td><td>${beschr(h.neu)}</td></tr>`).join('')}</tbody></table>` : '<p>Noch keine Änderungen.</p>'}`;
 }
 
 // ---------------------------------------------------------------- Sicherung
@@ -171,7 +271,8 @@ async function zeichneSicherung() {
 
 // ---------------------------------------------------------------- Bedienung
 document.addEventListener('click', (ev) => {
-  const b = ev.target.closest('button'); if (!b) return;
+  const b = ev.target.closest('button');
+  if (!b) { const z = ev.target.closest('[data-datum]'); if (z && state.seite === 'kalender') oeffneTag(z.dataset.datum); return; }
   if (b.dataset.seite) { state.seite = b.dataset.seite; zeichne(); }
   else if (b.dataset.ansicht) { state.ansicht = b.dataset.ansicht; zeichne(); }
   else if (b.dataset.aktion === 'vor') { [state.jahr, state.monat] = monatWeiter(1); zeichne(); }
@@ -179,4 +280,5 @@ document.addEventListener('click', (ev) => {
   else if (b.dataset.aktion === 'heute') { const h = heuteStr(); state.jahr = +h.slice(0, 4); state.monat = +h.slice(5, 7); zeichne(); }
 });
 
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 start();

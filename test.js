@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import fs from 'node:fs';
 import { createDb } from './src/db.js';
-import { turnusImportieren, planErzeugen, eintragSetzen, nrvSetzen, wrAnteil, bazSumme, zeitenVorschlag } from './src/dienstplan.js';
+import { turnusImportieren, planErzeugen, eintragSetzen, eintragLoeschen, historie, nrvSetzen, wrAnteil, bazSumme, zeitenVorschlag } from './src/dienstplan.js';
 import { hhmm, TAGE, wochentag } from './src/zeit.js';
 
 const db = createDb('test');
@@ -56,3 +56,8 @@ ok(w32.turnusWoche === 1 && w32.code === '10001', `23.08.2027 = Turnus-Woche ${w
 const letzter = (await db.eintraege.orderBy('datum').last()).datum;
 console.log('Letzter Dienst im Plan:', letzter, '| Einträge gesamt:', await db.eintraege.count());
 ok(letzter <= '2027-12-12', 'Plan endet spätestens am 12.12.2027');
+
+// 9) Dienst entfernen: Tag ist frei, Historie behält den alten Stand
+await eintragLoeschen(db, '2026-12-20');
+const hh = await historie(db, '2026-12-20');
+ok(!(await db.eintraege.get('2026-12-20')) && hh.length === 2 && hh[1].neu === null && hh[1].alt.code === '10004', 'Entfernen: Tag frei, Historie vollständig (anlegen, entfernen)');

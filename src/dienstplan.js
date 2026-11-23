@@ -117,18 +117,36 @@ export async function nrvSetzen(db, datum, nrv, jetzt = new Date()) {
 // ---------------------------------------------------------------------------
 // 5) Wie viel von einem Dienst liegt in der Wochenruhe? (nur Hinweis, keine Abrechnung)
 // ---------------------------------------------------------------------------
+export function wrAnteilBerechnen(wochenruhen, datum, beginn, ende) {
+  const endeFolgetag = minuten(ende) < minuten(beginn);
+  const s = absMin(datum, beginn);
+  const en = endeFolgetag ? absMin(addTage(datum, 1), ende) : absMin(datum, ende);
+  let innen = 0;
+  for (const w of wochenruhen) {
+    const [sd, sz] = w.start.split(' '); const [ed, ez] = w.ende.split(' ');
+    innen += Math.max(0, Math.min(en, absMin(ed, ez)) - Math.max(s, absMin(sd, sz)));
+  }
+  return { gesamt: en - s, inWr: innen, ausserhalb: en - s - innen, text: innen ? `${hhmm(innen)}h in der WR` : 'nicht in der WR' };
+}
+
 export async function wrAnteil(db, datum) {
   const e = await db.eintraege.get(datum);
   if (!e) return null;
-  const s = absMin(datum, e.beginn);
-  const en = e.endeFolgetag ? absMin(addTage(datum, 1), e.ende) : absMin(datum, e.ende);
-  let innen = 0;
-  for (const w of await db.wochenruhen.toArray()) {
-    const [sd, sz] = w.start.split(' '); const [ed, ez] = w.ende.split(' ');
-    const ws = absMin(sd, sz), we = absMin(ed, ez);
-    innen += Math.max(0, Math.min(en, we) - Math.max(s, ws));
-  }
-  return { gesamt: en - s, inWr: innen, ausserhalb: en - s - innen, text: innen ? `${hhmm(innen)}h in der WR` : 'nicht in der WR' };
+  return wrAnteilBerechnen(await db.wochenruhen.toArray(), datum, e.beginn, e.ende);
+}
+
+export async function eintragLoeschen(db, datum, jetzt = new Date()) {
+  const alt = await db.eintraege.get(datum);
+  if (!alt) return;
+  await db.transaction('rw', db.eintraege, db.aenderungen, async () => {
+    await db.eintraege.delete(datum);
+    await db.aenderungen.add({ datum, zeitstempel: jetzt.toISOString(), alt, neu: null, nrv: alt.nrv ?? false });
+  });
+}
+
+export async function historie(db, datum = null) {
+  const alle = datum ? await db.aenderungen.where('datum').equals(datum).toArray() : await db.aenderungen.toArray();
+  return alle.sort((a, b) => a.id - b.id);
 }
 
 // Summe bAZ über einen Zeitraum (für spätere Analyse; hier nur zum Gegenprüfen)
