@@ -1,0 +1,22 @@
+{
+  "name": "dienstplan",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js",
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "dexie": "^4.4.7",
+    "fake-indexeddb": "^6.2.8"
+  },
+  "devDependencies": {
+    "vite": "^8.3.8"
+  }
+}

@@ -1,0 +1,76 @@
+/* Bewusst schlicht: flach, eckig, wenig Farbe. Die Optik kommt später. */
+:root {
+  --text: #111;
+  --muted: #6b6b6b;
+  --linie: #c8c8c8;
+  --flaeche: #f0f0f0;
+  --akzent: #1d3557;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: #fff; color: var(--text);
+  font: 15px/1.35 Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+header { border-bottom: 1px solid var(--text); }
+nav { display: flex; gap: 0; max-width: 1100px; margin: 0 auto; }
+nav button {
+  border: 0; border-right: 1px solid var(--linie); background: #fff; color: var(--text);
+  padding: 12px 16px; font: inherit; cursor: pointer; border-radius: 0;
+}
+nav button[aria-current="true"] { background: var(--akzent); color: #fff; }
+main { max-width: 1100px; margin: 0 auto; padding: 12px; }
+h1, h2 { font-size: 15px; margin: 18px 0 6px; font-weight: bold; }
+p.hinweis { color: var(--muted); margin: 6px 0; }
+
+.leiste { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.leiste .raum { flex: 1; }
+button.knopf, select, input {
+  font: inherit; border: 1px solid var(--text); background: #fff; color: var(--text);
+  padding: 6px 10px; border-radius: 0;
+}
+button.knopf { cursor: pointer; }
+button.knopf[aria-pressed="true"] { background: var(--text); color: #fff; }
+
+/* Liste */
+table { border-collapse: collapse; width: 100%; }
+th { text-align: left; font-weight: bold; border-bottom: 1px solid var(--text); padding: 4px 6px; }
+td { border-bottom: 1px solid var(--linie); padding: 5px 6px; vertical-align: top; }
+td.zahl, th.zahl { text-align: right; }
+td.kein-umbruch { white-space: nowrap; }
+tr.frei td { color: var(--muted); }
+tr.wr td { background: var(--flaeche); }
+tr.reserve .code { color: var(--muted); font-style: italic; }
+tr.woche td { border-top: 1px solid var(--text); }
+tr.heute td:first-child { box-shadow: inset 3px 0 0 var(--akzent); }
+.code { font-weight: bold; }
+.klein { color: var(--muted); font-size: 13px; }
+
+/* Raster */
+.raster { display: grid; grid-template-columns: repeat(7, 1fr); border-left: 1px solid var(--linie); border-top: 1px solid var(--linie); }
+.raster .kopf { padding: 4px 6px; font-weight: bold; border-right: 1px solid var(--linie); border-bottom: 1px solid var(--text); }
+.raster .tag {
+  min-height: 92px; padding: 4px 6px; border-right: 1px solid var(--linie); border-bottom: 1px solid var(--linie);
+  overflow: hidden;
+}
+.raster .tag.leer { background: #fff; }
+.raster .tag.wr { background: var(--flaeche); }
+.raster .tag.heute .nr { background: var(--akzent); color: #fff; padding: 0 4px; }
+.raster .nr { color: var(--muted); font-size: 13px; }
+.raster .zeit { font-size: 13px; }
+.raster .tag.reserve .code { color: var(--muted); font-style: italic; }
+
+.monat { margin-bottom: 18px; }
+.box { border: 1px solid var(--text); padding: 12px; margin: 12px 0; max-width: 520px; }
+.box label { display: block; margin: 8px 0 2px; }
+
+@media (max-width: 720px) {
+  .nur-breit { display: none; }
+  main { padding: 8px; }
+  body { font-size: 14px; }
+  td, th { padding: 5px 4px; }
+  nav button { padding: 10px 12px; }
+}
+@media (min-width: 721px) {
+  .nur-schmal { display: none; }
+}
